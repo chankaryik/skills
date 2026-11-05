@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: bugfix-deleted-tags-on-save
+expected_outcome: |
+  A testing scope for APP-688 with a two-tab setup (editor in one tab, delete the tag in Settings in another), main cases for saving and publishing after a delete, deleting every tag of a step, the tag picker count, an AI assistant case, regression on normal tag add/remove, and a note that the request payload is the real check if the backend fix is on staging. Short nested bullets, no em dashes.
+context:
+  scaffold_script: place-files.sh

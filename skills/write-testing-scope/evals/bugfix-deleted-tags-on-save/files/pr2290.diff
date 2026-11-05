@@ -1,0 +1,216 @@
+diff --git a/src/modules/automations/Editor.vue b/src/modules/automations/Editor.vue
+index 7c2d9a1..e41b6f0 100644
+--- a/src/modules/automations/Editor.vue
++++ b/src/modules/automations/Editor.vue
+@@ -12,6 +12,7 @@ import { useAutomationForm } from './composables/useAutomationForm';
+ import { useUpdateAutomation, usePublishAutomation } from '@/queries/automations';
++import { useTagsBulkAsync, useKnownTags } from '@/queries/tags';
++import { collectTagIds, keepResolvedTagIds, hasEmptyTagStep } from './utilities/tags';
+ import ReviewDialog from './components/ReviewDialog.vue';
+ import StepList from './components/StepList.vue';
+ import AiAssistantPanel from './components/AiAssistantPanel.vue';
+@@ -41,22 +42,48 @@ const { mutateAsync: updateAutomation, isPending: isSaving } = useUpdateAutomation();
+ const { mutateAsync: publishAutomation, isPending: isPublishing } = usePublishAutomation();
++const fetchTagsBulk = useTagsBulkAsync();
++const knownTags = useKnownTags(() => collectTagIds(form.value.steps));
++const showNoTagsWarning = ref(false);
++
++// A tag deleted in another tab never reaches this tab's cache, because the
++// socket skips the user's own events. Re-check the tag ids right before
++// submitting and send only the ones that still exist.
++const isCheckingTags = ref(false);
++
++async function resolveSavableTagIds(steps) {
++  const ids = collectTagIds(steps);
++  if (!ids.length) return steps;
++  isCheckingTags.value = true;
++  try {
++    const found = await fetchTagsBulk(ids, { force: true });
++    return keepResolvedTagIds(steps, found);
++  } finally {
++    isCheckingTags.value = false;
++  }
++}
++
++const isSubmitLocked = computed(
++  () => isSaving.value || isPublishing.value || isCheckingTags.value,
++);
++
++// The AI assistant reads the current form, so give it the savable tag ids
++// only. Otherwise it can suggest a step that uses a deleted tag.
++const formWithSavableTags = computed(() => ({
++  ...form.value,
++  steps: keepResolvedTagIds(form.value.steps, knownTags.value),
++}));
+
+ async function onSave() {
+-  await updateAutomation({ id: automation.value.id, ...form.value });
++  const steps = await resolveSavableTagIds(form.value.steps);
++  await updateAutomation({ id: automation.value.id, ...form.value, steps });
+   markSaved();
+ }
+
+ async function onPublish() {
+-  await publishAutomation({ id: automation.value.id, ...form.value });
++  const steps = await resolveSavableTagIds(form.value.steps);
++  if (hasEmptyTagStep(steps)) {
++    showNoTagsWarning.value = true;
++    return;
++  }
++  await publishAutomation({ id: automation.value.id, ...form.value, steps });
+   markSaved();
+ }
+
+ async function onReviewSubmit() {
+-  await publishAutomation({ id: automation.value.id, ...form.value, reviewed: true });
++  const steps = await resolveSavableTagIds(form.value.steps);
++  await publishAutomation({ id: automation.value.id, ...form.value, steps, reviewed: true });
+   markSaved();
+ }
+@@ -88,9 +115,9 @@ async function onReviewSubmit() {
+     <EditorHeader
+-      :saving="isSaving"
+-      :publishing="isPublishing"
++      :saving="isSaving || isCheckingTags"
++      :publishing="isPublishing || isCheckingTags"
++      :disabled="isSubmitLocked"
+       @save="onSave"
+       @publish="onPublish"
+     />
+@@ -102,7 +129,7 @@ async function onReviewSubmit() {
+     <AiAssistantPanel
+-      :current-form="form"
++      :current-form="formWithSavableTags"
+       @apply="applyAssistantChanges"
+     />
+diff --git a/src/modules/automations/components/steps/AddTagStep.vue b/src/modules/automations/components/steps/AddTagStep.vue
+index 3b81c4e..0d7a2f2 100644
+--- a/src/modules/automations/components/steps/AddTagStep.vue
++++ b/src/modules/automations/components/steps/AddTagStep.vue
+@@ -8,15 +8,24 @@ const props = defineProps({
+   step: { type: Object, required: true },
+ });
+
+-const { data: tags } = useTagsBulk(() => props.step.tagIds);
++const { data: tags, isSuccess } = useTagsBulk(() => props.step.tagIds);
++
++// Only the ids the lookup returned can be saved. While the lookup is loading
++// or has failed, keep every id, so nothing is dropped by mistake.
++const savableTagIds = computed(() =>
++  isSuccess.value ? keepResolvedIds(props.step.tagIds, tags.value) : props.step.tagIds,
++);
++
++watch(savableTagIds, (ids) => emit('update:savable-tag-ids', ids));
+
+ const selectedCount = computed(() => props.step.tagIds.length);
++const savableCount = computed(() => savableTagIds.value.length);
+ </script>
+
+ <template>
+   <StepCard :title="t('automations.steps.addTag.title')">
+-    <TagChips :tags="tags" />
++    <TagChips :tags="tags" />
++    <EmptyTagsState v-if="isSuccess && !savableCount" />
+     <TagPickerDrawer
+-      :selected-ids="step.tagIds"
+-      :save-label="t('common.saveCount', { count: selectedCount })"
++      :selected-ids="savableTagIds"
++      :save-label="t('common.saveCount', { count: savableCount })"
+       @save="onPickerSave"
+     />
+   </StepCard>
+diff --git a/src/modules/automations/utilities/tags.js b/src/modules/automations/utilities/tags.js
+new file mode 100644
+index 0000000..5a9c3e2
+--- /dev/null
++++ b/src/modules/automations/utilities/tags.js
+@@ -0,0 +1,31 @@
++export function keepResolvedIds(ids = [], found = []) {
++  const existing = new Set(found.map((tag) => tag.id));
++  return ids.filter((id) => existing.has(id));
++}
++
++export function collectTagIds(steps = []) {
++  return steps
++    .filter((step) => step.type === 'add_tag' || step.type === 'remove_tag')
++    .flatMap((step) => step.tagIds ?? []);
++}
++
++export function keepResolvedTagIds(steps = [], found = []) {
++  return steps.map((step) =>
++    step.type === 'add_tag' || step.type === 'remove_tag'
++      ? { ...step, tagIds: keepResolvedIds(step.tagIds, found) }
++      : step,
++  );
++}
++
++// Publish shows the "No tags selected" warning when a tag step is empty. It
++// reads the savable ids, so a step whose tags were all deleted counts as empty.
++export function hasEmptyTagStep(steps = []) {
++  return steps.some(
++    (step) => (step.type === 'add_tag' || step.type === 'remove_tag') && !step.tagIds?.length,
++  );
++}
+diff --git a/src/queries/tags.js b/src/queries/tags.js
+index 91e0b44..c3f17a8 100644
+--- a/src/queries/tags.js
++++ b/src/queries/tags.js
+@@ -20,19 +20,38 @@ export function useTagsBulk(ids) {
+   return useQuery({
+     queryKey: computed(() => ['tags', 'bulk', toValue(ids)]),
+-    queryFn: () => api.post('/tags/bulk', { ids: toValue(ids) }).then((r) => r.data),
++    queryFn: () => fetchBulk(toValue(ids)),
+     enabled: computed(() => toValue(ids)?.length > 0),
+-    meta: { errorToast: true },
+   });
+ }
++
++// When none of the requested ids exist, the API answers 404 "Tags do not
++// exist" instead of an empty list. Treat that as an empty list, with no
++// toast. Other errors still show the error toast.
++async function fetchBulk(ids) {
++  try {
++    const response = await api.post('/tags/bulk', { ids });
++    return response.data;
++  } catch (error) {
++    if (error?.response?.status === 404) return [];
++    notifyError(error);
++    throw error;
++  }
++}
++
++export function useTagsBulkAsync() {
++  const queryClient = useQueryClient();
++  return (ids, { force = false } = {}) =>
++    queryClient.fetchQuery({
++      queryKey: ['tags', 'bulk', ids],
++      queryFn: () => fetchBulk(ids),
++      staleTime: force ? 0 : 30_000,
++    });
++}
+diff --git a/test/modules/automations/utilities/tags.test.ts b/test/modules/automations/utilities/tags.test.ts
+new file mode 100644
+index 0000000..b8e1d07
+--- /dev/null
++++ b/test/modules/automations/utilities/tags.test.ts
+@@ -0,0 +1,22 @@
++import { keepResolvedIds, keepResolvedTagIds } from '@/modules/automations/utilities/tags';
++
++describe('keepResolvedIds', () => {
++  it('drops ids the lookup did not return', () => {
++    expect(keepResolvedIds(['a', 'b', 'c'], [{ id: 'a' }, { id: 'c' }])).toEqual(['a', 'c']);
++  });
++});
++
++describe('keepResolvedTagIds', () => {
++  it('only touches tag steps', () => {
++    const steps = [
++      { type: 'add_tag', tagIds: ['a', 'b'] },
++      { type: 'send_message', text: 'hi' },
++    ];
++    expect(keepResolvedTagIds(steps, [{ id: 'b' }])).toEqual([
++      { type: 'add_tag', tagIds: ['b'] },
++      { type: 'send_message', text: 'hi' },
++    ]);
++  });
++});

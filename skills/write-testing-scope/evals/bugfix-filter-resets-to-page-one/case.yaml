@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: bugfix-filter-resets-to-page-one
+expected_outcome: |
+  A short bullet testing scope for APP-640 in a Linear >>> block. Covers changing the date range from page 2+ on both the Activity log and the Audit log going back to page 1 with rows, page size changes, paging after the reset, and a regression check on other lists that share the changed composable. Plain English, nested bullets, no em dashes, no intro paragraph.
+context:
+  scaffold_script: place-files.sh

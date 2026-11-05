@@ -1,0 +1,134 @@
+diff --git a/src/composables/usePagedList.js b/src/composables/usePagedList.js
+index 4a1c2e7..9b03f5d 100644
+--- a/src/composables/usePagedList.js
++++ b/src/composables/usePagedList.js
+@@ -1,6 +1,15 @@
+ import { computed, ref, watch } from 'vue';
+
++/**
++ * Shared paging state for list and table screens.
++ *
++ * Lists backed by an infinite query (`fetchNextPage` passed in) keep every
++ * loaded page in one cache. When the filters, the sort or the page size
++ * change, that cache is rebuilt from page 1, so the visible page has to go
++ * back to 1 as well, or it points at a page that no longer exists (APP-640).
++ * Plain paged lists keep their own behaviour.
++ */
+ export function usePagedList({
+   filters,
+   sort,
+   pageSize = ref(25),
+   fetchNextPage,
+   pages,
+ }) {
+   const currentPage = ref(1);
+
+   const visibleRows = computed(() => {
+     const page = pages.value?.[currentPage.value - 1];
+     return page?.rows ?? [];
+   });
+
+@@ -18,18 +27,34 @@ export function usePagedList({
+   async function goToPage(page) {
+     if (fetchNextPage && page > (pages.value?.length ?? 0)) {
+       await fetchNextPage();
+     }
+     currentPage.value = page;
+   }
+
+-  watch(
+-    () => [filters.value, sort.value],
+-    () => {
+-      if (!fetchNextPage) {
+-        currentPage.value = 1;
+-      }
+-    },
+-    { deep: true },
+-  );
++  // Plain paged lists already went back to page 1 on a filter or sort
++  // change. Lists with an infinite query rebuild their cache from page 1
++  // when the filters, sort or page size change, so they reset too now.
++  watch(
++    () => [filters.value, sort.value, pageSize.value],
++    (next, prev) => {
++      const changed = next.map(
++        (value, i) => JSON.stringify(value) !== JSON.stringify(prev[i]),
++      );
++      const [filtersChanged, sortChanged, pageSizeChanged] = changed;
++      if (!fetchNextPage) {
++        if (filtersChanged || sortChanged) currentPage.value = 1;
++        return;
++      }
++      if (filtersChanged || sortChanged || pageSizeChanged) {
++        currentPage.value = 1;
++      }
++    },
++    { deep: true },
++  );
+ 
+   return {
+     currentPage,
+     visibleRows,
+     goToPage,
+   };
+ }
+diff --git a/test/composables/usePagedList.test.ts b/test/composables/usePagedList.test.ts
+index 2f9d1a0..c7e88b4 100644
+--- a/test/composables/usePagedList.test.ts
++++ b/test/composables/usePagedList.test.ts
+@@ -40,6 +40,52 @@ describe('usePagedList', () => {
+     expect(list.currentPage.value).toBe(2);
+   });
+
++  describe('with an infinite query (APP-640)', () => {
++    it('goes back to page 1 when the filters change on a later page', async () => {
++      const { list, filters } = setupInfinite({ loadedPages: 3 });
++      await list.goToPage(3);
++      filters.value = { ...filters.value, range: 'last_30_days' };
++      await nextTick();
++      expect(list.currentPage.value).toBe(1);
++    });
++
++    it('goes back to page 1 when the sort changes', async () => {
++      const { list, sort } = setupInfinite({ loadedPages: 2 });
++      await list.goToPage(2);
++      sort.value = { field: 'createdAt', direction: 'asc' };
++      await nextTick();
++      expect(list.currentPage.value).toBe(1);
++    });
++
++    it('goes back to page 1 when the page size changes', async () => {
++      const { list, pageSize } = setupInfinite({ loadedPages: 3 });
++      await list.goToPage(3);
++      pageSize.value = 50;
++      await nextTick();
++      expect(list.currentPage.value).toBe(1);
++    });
++
++    it('keeps the page when nothing changed', async () => {
++      const { list, filters } = setupInfinite({ loadedPages: 2 });
++      await list.goToPage(2);
++      filters.value = { ...filters.value };
++      await nextTick();
++      expect(list.currentPage.value).toBe(2);
++    });
++  });
++
++  describe('without an infinite query', () => {
++    it('still goes back to page 1 when the filters change', async () => {
++      const { list, filters } = setupPlain();
++      await list.goToPage(3);
++      filters.value = { ...filters.value, range: 'last_30_days' };
++      await nextTick();
++      expect(list.currentPage.value).toBe(1);
++    });
++
++    it('keeps the current page when only the page size changes', async () => {
++      const { list, pageSize } = setupPlain();
++      await list.goToPage(3);
++      pageSize.value = 50;
++      await nextTick();
++      expect(list.currentPage.value).toBe(3);
++    });
++  });
+ });

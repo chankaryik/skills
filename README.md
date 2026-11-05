@@ -7,6 +7,7 @@ My agent skills, packaged as a Claude Code plugin marketplace.
 ```bash
 claude plugin marketplace add chankaryik/skills
 claude plugin install write-human@chankaryik-skills
+claude plugin install write-testing-scope@chankaryik-skills
 ```
 
 Inside Claude Code you can run the same thing as `/plugin marketplace add chankaryik/skills`, then pick a plugin from `/plugin`.
@@ -14,6 +15,7 @@ Inside Claude Code you can run the same thing as `/plugin marketplace add chanka
 ## Skills
 
 - **write-human**: house writing standard for anything a person will read. Short, direct, easy to scan, no em dashes.
+- **write-testing-scope**: QA testing scope for a Linear ticket, PRD section or PR. Plain-English bullets, only what QA needs.
 
 ## Adding a skill
 
