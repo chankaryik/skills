@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: slack-feature-announcement
+expected_outcome: |
+  A Slack-formatted announcement that opens with the headline payoff (500k rows, background, emailed link), keeps every fact, lists what changes, ends with the docs link and the support channel, has no em dashes and no markdown headings.

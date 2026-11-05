@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: slack-thread-reply
+expected_outcome: |
+  A short Slack thread reply that answers the question in the first line (likely Thursday, conditional on QA Wednesday, fallback next Tuesday), mentions the GMT+13 bug in plain words, and has no greeting, filler or em dashes.

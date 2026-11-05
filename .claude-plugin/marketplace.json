@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "chankaryik-skills",
+  "owner": {
+    "name": "chankaryik"
+  },
+  "metadata": {
+    "description": "Karyik's personal agent skills for Claude Code.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "write-human",
+      "description": "House writing standard for anything a person will read. Makes drafts sound human, short, direct and easy to scan, with no em dashes.",
+      "version": "1.0.0",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/write-human"],
+      "category": "productivity",
+      "keywords": ["writing", "style", "slack", "linear", "notion"]
+    }
+  ]
+}

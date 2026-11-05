@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: notion-ci-proposal
+expected_outcome: |
+  A Notion proposal that opens with a short summary of the payoff, explains the problem with the numbers given, states the proposal, covers cost and the flakiness risk honestly, and ends with a clear ask. No em dashes.
